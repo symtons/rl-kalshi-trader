@@ -1,10 +1,16 @@
-import gymnasium as gym
+﻿import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import pandas as pd
 from typing import Dict, Tuple, Any
-from .features import FeatureEngineering
-from .market_simulator import KalshiMarketSimulator
+
+# Handle both relative and absolute imports
+try:
+    from .features import FeatureEngineering
+    from .market_simulator import KalshiMarketSimulator
+except ImportError:
+    from features import FeatureEngineering
+    from market_simulator import KalshiMarketSimulator
 
 class KalshiTradingEnv(gym.Env):
     '''Kalshi Bitcoin Trading Environment for RL'''
