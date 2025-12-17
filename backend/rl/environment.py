@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Tuple, Any
 
-# Handle both relative and absolute imports
 try:
     from .features import FeatureEngineering
     from .market_simulator import KalshiMarketSimulator
@@ -13,7 +12,7 @@ except ImportError:
     from market_simulator import KalshiMarketSimulator
 
 class KalshiTradingEnv(gym.Env):
-    '''Kalshi Bitcoin Trading Environment for RL'''
+    '''Kalshi Trading Environment V3 - AGGRESSIVE trading incentives'''
     metadata = {'render_modes': ['human']}
     
     def __init__(self, price_data: pd.DataFrame, initial_balance: float = 10000,
@@ -29,6 +28,7 @@ class KalshiTradingEnv(gym.Env):
         self.feature_engineer = FeatureEngineering(lookback_window=24)
         self.market_sim = KalshiMarketSimulator()
         
+        # Action space: [decision, position_size]
         self.action_space = spaces.MultiDiscrete([5, 5])
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(50,), dtype=np.float32)
         
@@ -38,6 +38,7 @@ class KalshiTradingEnv(gym.Env):
         self.trade_history = []
         self.portfolio_values = [initial_balance]
         self.max_portfolio_value = initial_balance
+        self.steps_without_trade = 0
         
     def reset(self, seed=None, options=None) -> Tuple[np.ndarray, Dict]:
         super().reset(seed=seed)
@@ -48,6 +49,7 @@ class KalshiTradingEnv(gym.Env):
         self.trade_history = []
         self.portfolio_values = [self.initial_balance]
         self.max_portfolio_value = self.initial_balance
+        self.steps_without_trade = 0
         
         observation = self._get_observation()
         info = self._get_info()
@@ -58,22 +60,83 @@ class KalshiTradingEnv(gym.Env):
         decision, size_idx = action
         position_size = [0, 10, 25, 50, 100][size_idx]
         
-        reward = self._execute_trade(decision, position_size)
-        self._update_positions()
+        # Track steps without trading
+        if decision == 0:
+            self.steps_without_trade += 1
+        else:
+            self.steps_without_trade = 0
+        
+        # Execute trade
+        self._execute_trade(decision, position_size)
+        
+        # Update positions
+        pnl_from_resolved = self._update_positions()
+        
+        # Move to next step
         self.current_step += 1
         
+        # Calculate portfolio value
+        prev_value = self.portfolio_values[-1]
         portfolio_value = self._calculate_portfolio_value()
         self.portfolio_values.append(portfolio_value)
         self.max_portfolio_value = max(self.max_portfolio_value, portfolio_value)
         
-        terminated = (self.current_step >= len(self.price_data) - 1 or
-                     portfolio_value <= 0.3 * self.initial_balance)
+        # AGGRESSIVE REWARD CALCULATION
+        reward = self._calculate_reward(prev_value, portfolio_value, pnl_from_resolved, decision)
+        
+        # Check if done
+        terminated = (
+            self.current_step >= len(self.price_data) - 1 or
+            portfolio_value <= 0.2 * self.initial_balance  # Allow more drawdown
+        )
         truncated = False
         
         observation = self._get_observation()
         info = self._get_info()
         
         return observation, reward, terminated, truncated, info
+    
+    def _calculate_reward(self, prev_value, current_value, pnl_from_resolved, decision):
+        '''AGGRESSIVE reward that strongly encourages trading'''
+        reward = 0.0
+        
+        # Main reward: P&L change (scaled aggressively)
+        pnl_change = current_value - prev_value
+        reward += pnl_change / 3  # Strong scaling
+        
+        # HUGE bonus for profitable resolved trades
+        if pnl_from_resolved > 0:
+            reward += 50.0  # Massive bonus
+        elif pnl_from_resolved < 0:
+            reward -= 5.0  # Small loss penalty
+        
+        # STRONG penalty for HOLD
+        if decision == 0:
+            reward -= 2.0  # Heavy penalty for holding
+            
+            # ESCALATING penalty for consecutive holds
+            if self.steps_without_trade > 10:
+                reward -= 5.0
+            if self.steps_without_trade > 50:
+                reward -= 10.0
+        else:
+            reward += 1.0  # BONUS for taking action
+        
+        # Bonus for having open positions
+        if len(self.positions) > 0:
+            reward += 0.5
+        
+        # Bonus for trading activity
+        if len(self.trade_history) > 0:
+            recent_trades = len([t for t in self.trade_history if t['step'] > self.current_step - 100])
+            reward += 0.1 * recent_trades
+        
+        # Only penalize severe drawdowns
+        drawdown = (self.max_portfolio_value - current_value) / self.max_portfolio_value
+        if drawdown > 0.3:  # Only if > 30% drawdown
+            reward -= 20.0 * drawdown
+        
+        return reward
     
     def _get_observation(self) -> np.ndarray:
         prices = self.price_data['close'].values
@@ -134,7 +197,7 @@ class KalshiTradingEnv(gym.Env):
         
         cost = entry_price * position_size
         if cost > self.balance:
-            return -1.0
+            return 0.0  # Just skip if can't afford
         
         self.balance -= cost
         
@@ -145,11 +208,12 @@ class KalshiTradingEnv(gym.Env):
         }
         
         self.positions.append(position)
-        return -0.05
+        return 0.0
     
     def _update_positions(self):
         current_price = self.price_data.iloc[self.current_step]['close']
         positions_to_remove = []
+        total_pnl = 0.0
         
         for i, pos in enumerate(self.positions):
             if self.current_step >= pos['expiry_step']:
@@ -162,6 +226,7 @@ class KalshiTradingEnv(gym.Env):
                 )
                 
                 self.balance += (pos['entry_price'] * pos['size'] + pnl)
+                total_pnl += pnl
                 
                 self.trade_history.append({
                     'step': self.current_step, 'type': pos['type'],
@@ -172,6 +237,8 @@ class KalshiTradingEnv(gym.Env):
         
         for i in reversed(positions_to_remove):
             self.positions.pop(i)
+        
+        return total_pnl
     
     def _calculate_portfolio_value(self) -> float:
         return self.balance + self._calculate_unrealized_pnl()
