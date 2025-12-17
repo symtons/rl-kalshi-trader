@@ -27,10 +27,10 @@ class TradingMetricsCallback(BaseCallback):
                     self.logger.record('episode/length', info['episode']['l'])
         return True
 
-print('🚀 Training PPO Agent - 15 Minute Data with Improved Rewards')
+print('🚀 Training PPO Agent - AGGRESSIVE Rewards + GPU')
 print('=' * 60)
 
-# Configuration
+# Configuration with higher entropy for exploration
 CONFIG = {
     'learning_rate': 3e-4,
     'n_steps': 2048,
@@ -39,16 +39,27 @@ CONFIG = {
     'gamma': 0.99,
     'gae_lambda': 0.95,
     'clip_range': 0.2,
-    'ent_coef': 0.05,  # Higher entropy for more exploration
+    'ent_coef': 0.1,  # Even higher entropy for exploration
     'vf_coef': 0.5,
     'max_grad_norm': 0.5,
-    'total_timesteps': 1000000,  # 1M timesteps for more data
+    'total_timesteps': 1000000,
     'initial_balance': 10000
 }
 
 print('Configuration:')
 for key, value in CONFIG.items():
     print(f'  {key}: {value}')
+print()
+
+# Check GPU
+import torch
+print('🔥 GPU Check:')
+print(f'  CUDA available: {torch.cuda.is_available()}')
+if torch.cuda.is_available():
+    print(f'  GPU: {torch.cuda.get_device_name(0)}')
+    print(f'  GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
+else:
+    print('  Using CPU (training will be slower)')
 print()
 
 # Load 15-minute data
@@ -85,40 +96,37 @@ print('✓ Environments created')
 print()
 
 # Create directories
-os.makedirs('../../models/checkpoints_15m', exist_ok=True)
-os.makedirs('../../models/best_15m', exist_ok=True)
-os.makedirs('../../logs/tensorboard_15m', exist_ok=True)
-os.makedirs('../../logs/eval_15m', exist_ok=True)
+os.makedirs('../../models/checkpoints_aggressive', exist_ok=True)
+os.makedirs('../../models/best_aggressive', exist_ok=True)
+os.makedirs('../../logs/tensorboard_aggressive', exist_ok=True)
+os.makedirs('../../logs/eval_aggressive', exist_ok=True)
 
 print('📁 Output directories:')
-print(f'  Checkpoints: models/checkpoints_15m/')
-print(f'  Best model: models/best_15m/')
-print(f'  TensorBoard: logs/tensorboard_15m/')
+print(f'  Checkpoints: models/checkpoints_aggressive/')
+print(f'  Best model: models/best_aggressive/')
+print(f'  TensorBoard: logs/tensorboard_aggressive/')
 print()
 
 # Setup callbacks
 print('Setting up callbacks...')
 
-# Save checkpoints every 10k steps
 checkpoint_callback = CheckpointCallback(
     save_freq=10000,
-    save_path='../../models/checkpoints_15m/',
-    name_prefix='ppo_kalshi_15m',
+    save_path='../../models/checkpoints_aggressive/',
+    name_prefix='ppo_aggressive',
     verbose=1
 )
 
-# Evaluate on validation set every 5k steps
 eval_callback = EvalCallback(
     val_env,
-    best_model_save_path='../../models/best_15m/',
-    log_path='../../logs/eval_15m/',
+    best_model_save_path='../../models/best_aggressive/',
+    log_path='../../logs/eval_aggressive/',
     eval_freq=5000,
     deterministic=True,
     n_eval_episodes=5,
     verbose=1
 )
 
-# Custom trading metrics callback
 metrics_callback = TradingMetricsCallback()
 
 callbacks = CallbackList([checkpoint_callback, eval_callback, metrics_callback])
@@ -141,8 +149,8 @@ model = PPO(
     vf_coef=CONFIG['vf_coef'],
     max_grad_norm=CONFIG['max_grad_norm'],
     verbose=1,
-    tensorboard_log='../../logs/tensorboard_15m/',
-    device='auto'
+    tensorboard_log='../../logs/tensorboard_aggressive/',
+    device='auto'  # Automatically uses GPU if available
 )
 
 print('✓ Model created')
@@ -152,20 +160,25 @@ print(f'  Total parameters: {sum(p.numel() for p in model.policy.parameters()):,
 print()
 
 # Display training info
-print('🏋️ Starting training...')
+print('🏋️ Starting AGGRESSIVE training...')
 print('=' * 60)
 print(f'Total timesteps: {CONFIG["total_timesteps"]:,}')
 print(f'Expected episodes: ~{CONFIG["total_timesteps"] // len(train_df):,}')
 print(f'Training data: ~{len(train_df)//96:.1f} days of 15-min candles')
 print()
-print('Key improvements in this version:')
-print('  ✓ 4x more data (15-min vs 1-hour)')
-print('  ✓ Reward for profitable trades')
-print('  ✓ Penalty for holding (encourages action)')
-print('  ✓ Higher entropy coefficient (more exploration)')
-print('  ✓ Better reward shaping')
+print('🔥 AGGRESSIVE Reward Improvements:')
+print('  ✓ +50 reward for winning trades (was +5)')
+print('  ✓ -2 reward for holding (was -0.1)')
+print('  ✓ Escalating penalties for consecutive holds')
+print('  ✓ +1 reward for ANY action (encourages trading)')
+print('  ✓ Bonus for active trading')
 print()
-print('Estimated training time: 2-3 hours')
+
+if torch.cuda.is_available():
+    print(f'⚡ GPU Training - Expected time: 25-45 minutes')
+else:
+    print(f'⏰ CPU Training - Expected time: 2-3 hours')
+    
 print('Monitor progress at: http://localhost:6006')
 print('=' * 60)
 print()
@@ -176,7 +189,7 @@ try:
         total_timesteps=CONFIG['total_timesteps'],
         callback=callbacks,
         progress_bar=True,
-        tb_log_name='ppo_15m_run'
+        tb_log_name='ppo_aggressive_run'
     )
     
     print('\n' + '=' * 60)
@@ -184,13 +197,13 @@ try:
     print('=' * 60)
     
     # Save final model
-    final_model_path = '../../models/ppo_kalshi_15m_final'
+    final_model_path = '../../models/ppo_aggressive_final'
     model.save(final_model_path)
     print(f'✓ Final model saved to: {final_model_path}.zip')
     
     # Save configuration
     import json
-    config_path = '../../models/ppo_kalshi_15m_config.json'
+    config_path = '../../models/ppo_aggressive_config.json'
     with open(config_path, 'w') as f:
         json.dump(CONFIG, f, indent=2)
     print(f'✓ Config saved to: {config_path}')
@@ -200,7 +213,7 @@ except KeyboardInterrupt:
     print('⚠️ Training interrupted by user')
     print('=' * 60)
     
-    interrupted_model_path = '../../models/ppo_kalshi_15m_interrupted'
+    interrupted_model_path = '../../models/ppo_aggressive_interrupted'
     model.save(interrupted_model_path)
     print(f'✓ Model saved to: {interrupted_model_path}.zip')
 
@@ -209,13 +222,13 @@ except Exception as e:
     import traceback
     traceback.print_exc()
     
-    error_model_path = '../../models/ppo_kalshi_15m_error'
+    error_model_path = '../../models/ppo_aggressive_error'
     model.save(error_model_path)
     print(f'✓ Model saved to: {error_model_path}.zip')
 
 print('\n' + '=' * 60)
 print('Next steps:')
 print('  1. Evaluate model: python evaluate.py')
-print('  2. View TensorBoard: tensorboard --logdir=../../logs/tensorboard_15m')
-print('  3. Check best model in: models/best_15m/')
+print('  2. View TensorBoard: tensorboard --logdir=../../logs/tensorboard_aggressive')
+print('  3. Check best model in: models/best_aggressive/')
 print('=' * 60)

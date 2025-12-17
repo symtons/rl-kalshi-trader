@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from stable_baselines3 import PPO
 from environment import KalshiTradingEnv
 
-print('📊 Evaluating Trained PPO Agent (15-min data)')
+print('📊 Evaluating AGGRESSIVE Model')
 print('=' * 60)
 
 # Load 15-minute data
@@ -22,22 +22,10 @@ test_size = int(len(df) * 0.1)
 test_df = df[-test_size:].reset_index(drop=True)
 print(f'✓ Test data: {len(test_df)} rows')
 
-# Load the 15-minute trained model
+# Load the aggressive model
 print('Loading trained model...')
-model_path = '../../models/ppo_kalshi_15m_final'
-try:
-    model = PPO.load(model_path)
-    print(f'✓ Model loaded from: {model_path}')
-except Exception as e:
-    print(f'❌ Error loading model: {e}')
-    print(f'\nTrying to find available models...')
-    
-    # Check what models exist
-    import glob
-    models = glob.glob('../../models/*.zip')
-    print(f'Available models: {[os.path.basename(m) for m in models]}')
-    sys.exit(1)
-
+model = PPO.load('../../models/ppo_aggressive_final')
+print('✓ Model loaded')
 print()
 
 # Create test environment
@@ -89,7 +77,7 @@ print()
 # Risk metrics
 if len(portfolio_history) > 1:
     returns = np.diff(portfolio_history) / np.array(portfolio_history[:-1])
-    returns = returns[~np.isnan(returns)]  # Remove NaN values
+    returns = returns[~np.isnan(returns)]
     
     if len(returns) > 0 and np.std(returns) > 0:
         sharpe_ratio = np.mean(returns) / np.std(returns) * np.sqrt(len(test_df))
@@ -117,15 +105,32 @@ if len(actions_taken) > 0:
         print(f'{action_names[act]}: {count} ({count/len(actions_taken)*100:.1f}%)')
     print()
 
+# Trading activity summary
+if info['num_trades'] > 0:
+    winning_trades = sum(1 for t in env.trade_history if t['pnl'] > 0)
+    losing_trades = sum(1 for t in env.trade_history if t['pnl'] < 0)
+    avg_win = np.mean([t['pnl'] for t in env.trade_history if t['pnl'] > 0]) if winning_trades > 0 else 0
+    avg_loss = np.mean([t['pnl'] for t in env.trade_history if t['pnl'] < 0]) if losing_trades > 0 else 0
+    
+    print('💰 Trading Analysis:')
+    print('=' * 60)
+    print(f'Winning Trades: {winning_trades}')
+    print(f'Losing Trades: {losing_trades}')
+    print(f'Average Win: ')
+    print(f'Average Loss: ')
+    if avg_loss != 0:
+        print(f'Win/Loss Ratio: {abs(avg_win/avg_loss):.2f}')
+    print()
+
 # Create visualization
 print('Creating performance chart...')
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 
 ax1.plot(portfolio_history, linewidth=2, color='blue')
 ax1.axhline(y=10000, color='gray', linestyle='--', label='Initial Balance')
-ax1.set_title('Portfolio Value Over Time (15-min Model)', fontsize=14, fontweight='bold')
+ax1.set_title('Portfolio Value Over Time (AGGRESSIVE Model)', fontsize=14, fontweight='bold')
 ax1.set_xlabel('Step')
-ax1.set_ylabel('Portfolio Value')
+ax1.set_ylabel('Portfolio Value ($)')
 ax1.grid(True, alpha=0.3)
 ax1.legend()
 
@@ -134,13 +139,22 @@ ax2.plot(pnl_history, linewidth=2, color=color)
 ax2.axhline(y=0, color='gray', linestyle='--')
 ax2.set_title('Cumulative P&L', fontsize=14, fontweight='bold')
 ax2.set_xlabel('Step')
-ax2.set_ylabel('P&L')
+ax2.set_ylabel('P&L ($)')
 ax2.grid(True, alpha=0.3)
 
 plt.tight_layout()
 os.makedirs('../../logs', exist_ok=True)
-plt.savefig('../../logs/evaluation_results_15m.png', dpi=300, bbox_inches='tight')
-print('✓ Chart saved to logs/evaluation_results_15m.png')
+plt.savefig('../../logs/evaluation_aggressive.png', dpi=300, bbox_inches='tight')
+print('✓ Chart saved to logs/evaluation_aggressive.png')
 
 print('\n' + '=' * 60)
 print('✅ Evaluation complete!')
+print()
+
+# Final verdict
+if info['num_trades'] > 50:
+    print('✅ SUCCESS! Agent is actively trading!')
+elif info['num_trades'] > 10:
+    print('⚠️ PARTIAL: Agent trades but still conservative')
+else:
+    print('❌ FAILURE: Agent still not trading enough')
