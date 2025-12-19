@@ -35,7 +35,7 @@ class KalshiClient:
         self.environment = environment
         self.base_url = base_url or os.getenv(
             "KALSHI_DEMO_BASE_URL",
-            "https://demo-api.kalshi.co/trade-api/v2",
+            "https://demo-api.kalshi.co",
         )
         self.key_id = key_id or os.environ["KALSHI_API_KEY_ID"]
         self.private_key_path = private_key_path or os.getenv("KALSHI_PRIVATE_KEY_PATH")
