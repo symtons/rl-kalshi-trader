@@ -11,7 +11,7 @@ print('Creating client...')
 try:
     client = KalshiClient(
         base_url='https://demo-api.kalshi.co',
-        key_id='8400a198-5eaa-48b8-8687-d5ec71228257',
+        key_id='db025f14-ed64-4c19-940b-0ad3f336713f',
         private_key_path='C:\\Users\\simbe\\OneDrive\\Desktop\\RL\\rl-kalshi-trader\\backend\\kalshi_private_key.pem',
         environment=Environment.DEMO
     )

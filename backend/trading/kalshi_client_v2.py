@@ -1,4 +1,4 @@
-import os
+﻿import os
 import datetime
 import json
 from typing import Any, Dict, Optional
@@ -11,19 +11,12 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from cryptography.hazmat.backends import default_backend
 from dotenv import load_dotenv
 import uuid
-from typing import Any, Dict, Optional, List
 
 class Environment(Enum):
     DEMO = "demo"
     PROD = "prod"
 
 class KalshiClient:
-    """
-    Minimal Kalshi demo API client.
-
-    Auth: RSA signature over "<timestamp><method><path>" with private key.
-    """
-
     def __init__(
         self,
         base_url: Optional[str] = None,
@@ -35,9 +28,9 @@ class KalshiClient:
         self.environment = environment
         self.base_url = base_url or os.getenv(
             "KALSHI_DEMO_BASE_URL",
-            "https://demo-api.kalshi.co",
+            "https://demo-api.kalshi.co/trade-api/v2",
         )
-        self.key_id = key_id or os.environ["KALSHI_API_KEY_ID"]
+        self.key_id = key_id or os.environ.get("KALSHI_API_KEY_ID")
         self.private_key_path = private_key_path or os.getenv("KALSHI_PRIVATE_KEY_PATH")
 
         if not self.key_id:
@@ -49,11 +42,10 @@ class KalshiClient:
             raise ValueError("Invalid environment specified")
 
         with open(self.private_key_path, "rb") as f:
-            self._private_key = load_pem_private_key(f.read(), password=None,backend=default_backend())
-
-    # ---------- low-level helpers ----------
+            self._private_key = load_pem_private_key(f.read(), password=None, backend=default_backend())
 
     def _sign(self, message: bytes) -> str:
+        import base64
         signature = self._private_key.sign(
             message,
             padding.PSS(
@@ -62,9 +54,6 @@ class KalshiClient:
             ),
             hashes.SHA256(),
         )
-        # Kalshi expects base64 string
-        import base64
-
         return base64.b64encode(signature).decode("utf-8")
 
     def _request(
@@ -74,10 +63,6 @@ class KalshiClient:
         params: Optional[Dict[str, Any]] = None,
         body: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """
-        Send signed request to Kalshi demo API.
-        path: e.g. "/markets"
-        """
         url = self.base_url + path
         method_upper = method.upper()
         path_without_query = path.split("?")[0]
@@ -110,44 +95,28 @@ class KalshiClient:
     def create_order(
         self,
         ticker: str,
-        side: str,          # "yes" or "no"
-        action: str,        # "buy" or "sell"
+        side: str,
+        action: str,
         count: int,
-        price: float,       # in [0,1] or [0,100]
+        price: float,
         client_order_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        POST /portfolio/orders
-
-        side   : "yes" or "no"
-        action : "buy" or "sell"
-        count  : number of contracts
-        price  : float in [0,1] (prob) or [0,100] (cents)
-
-        Kalshi expects:
-          - exactly ONE of yes_price or no_price
-          - price in CENTS (int), with 1 <= price <= 99
-        """
-
-        # 1) Normalize price to cents
         if price <= 1.0:
             price_cents = int(round(price * 100))
         else:
             price_cents = int(round(price))
 
-        # 2) Clamp to [1, 99] since 0 and 100 are invalid
         price_cents = max(1, min(99, price_cents))
 
         body: Dict[str, Any] = {
             "ticker": ticker,
-            "side": side,            # "yes" | "no"
-            "action": action,        # "buy" | "sell"
+            "side": side,
+            "action": action,
             "count": count,
             "type": "limit",
             "client_order_id": client_order_id or str(uuid.uuid4()),
         }
 
-        # 3) Set ONLY the correct price field based on side
         if side == "yes":
             body["yes_price"] = price_cents
         elif side == "no":
@@ -155,5 +124,4 @@ class KalshiClient:
         else:
             raise ValueError(f"Invalid side: {side}, expected 'yes' or 'no'")
 
-        # base_url already has /trade-api/v2, so path is just /portfolio/orders
-        return self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
+        return self._request("POST", "/portfolio/orders", body=body)
